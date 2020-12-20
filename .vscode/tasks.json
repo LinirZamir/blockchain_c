@@ -9,6 +9,7 @@
 				"-g",
 				"blockchain.c",
 				"blockchain.utils.c",
+				"data_containers/dict.c",
 				"-o",
 				"blockchain",
 				"-lcrypto",

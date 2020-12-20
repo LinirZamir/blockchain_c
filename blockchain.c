@@ -1,13 +1,15 @@
 #include "blockchain.h"
 
 //This nodes IP
-char * our_ip;
+char our_ip[300] = {0};
 
 //Blockchain
-list* l_chain;
+blockchain* l_chain;
+dict* chain_nodes;
 
-//Difficuly of algorithm
-uint8_t target[32];
+//identifications
+char chain_filename[300];
+uint8_t target[32]; //target difficulty
 
 
 /**
@@ -74,24 +76,32 @@ int proof_of_work(block_t* block){
 
 int main(int argc, const char* argv[]) {
     int ret = 0;
-    char* gen = "genesisnounce";
     
-    l_chain = list_create();
+    //load defaults
+    strcpy(chain_filename, "chain_0.israft");
+
     //Set PoW algorithm difficulty (0xFF)
     memset(target, 0, sizeof(target));
     target[2] = 0xFF;
     
-    //Create genesis block
-    block_t* genesis = create_new_block(NULL, gen, strlen(gen));
+    //Create our blockchain and Process chain file
+    int chain_good = read_chain_from_file(l_chain, chain_filename);
+    if(chain_good!=0) {
+        l_chain = new_chain(); //TODO Write blockchain to file
+    }
+   
+   //Initialization of nodes on the server
+    chain_nodes = dict_create();
+    int loc = read_nodes_from_file("nodes.conf", chain_nodes);
+    sprintf(our_ip, "ipc:///tmp/pipeline_%d.ipc",loc);
 
-    //Init connection
+    
 
+    //TODO Init connection
+    //TODO initiate nanomsg
+    //TODO ping when a new node joins
 
-    proof_of_work(genesis);
-
-
-    //Load defaults
-    //strcpy(our_ip, "ipc:///tmp/pipeline_0.ipc");
-
-return 0;
+    proof_of_work(l_chain->head);
+    
+    return 0;
 }

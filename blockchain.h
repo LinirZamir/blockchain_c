@@ -16,6 +16,9 @@
 #include "nanomsg/include/pipeline.h"
 
 #define ERR_NULL 2
+#define ERR_FILE 3
+
+#define BLOCK_STR_SIZE 30000
 
 typedef struct block_header_t{
     uint32_t data_length;
@@ -32,17 +35,17 @@ typedef struct block_t{
     block_header_t header;
 }block_t;
 
-//List structure
-typedef struct list {
+//blockchain structure
+typedef struct blockchain {
     block_t* head;
     int length;
-} list;
+} blockchain;
 
-//UTILS
-
-list* list_create();
+//utils.c
+blockchain* new_chain();
 block_t* create_new_block(const block_t* prev, const char* data, uint32_t length);
+int read_chain_from_file(blockchain* in_chain, const char* filename);
+int read_nodes_from_file(const char* filename, dict* dict_nodes);
 
 //Blockchain.c
-
 int hash256(const char *input_data, unsigned char *output_data);
