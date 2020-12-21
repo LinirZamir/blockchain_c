@@ -274,12 +274,8 @@ int main(int argc, const char* argv[]) {
     dict_foreach(chain_nodes,announce_existance, NULL); //TODO Handle receive
     last_ping = time(NULL);
 
-    //TODO Init connection - threads
     //pthread_mutex_t our_mutex = PTHREAD_MUTEX_INITIALIZER
-    if(pthread_mutex_init(&our_mutex,NULL) != 0){
-        printf("Mutex Error!\n");
-        return ERR_GENERAL;
-    }
+
     if((ret = pthread_create(&inbound_network_thread, NULL, &in_server,NULL)) != 0) {
         printf("Error pthread_create:in");
         return ret;
