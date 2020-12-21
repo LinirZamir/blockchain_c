@@ -5,6 +5,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 #include <openssl/evp.h>
 #include <openssl/err.h>
@@ -67,8 +68,10 @@ blockchain* new_chain();
 block_t* create_new_block(const block_t* prev, const char* data, uint32_t length);
 int read_chain_from_file(blockchain* in_chain, const char* filename);
 int read_nodes_from_file(const char* filename, dict* dict_nodes);
-int announce_existance(bt_node* in_dict, void* data);
 int create_socket(const char* input);
+
+int ping(bt_node* in_dict, void* data);
+int announce_existance(bt_node* in_dict, void* data);
 
 //Blockchain.c
 int hash256(const char *input_data, unsigned char *output_data);

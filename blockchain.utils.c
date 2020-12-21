@@ -142,7 +142,7 @@ int announce_existance(bt_node* in_dict, void* data){
     message_item announcement;
     setup_message(&announcement);
     strcpy(announcement.toWhom,in_dict->key);
-    strcpy(announcement.message, " P ");
+    strcpy(announcement.message, "N ");
     strcat(announcement.message, our_ip);
 
     li_append(outbound_msg_queue,&announcement,sizeof(announcement));

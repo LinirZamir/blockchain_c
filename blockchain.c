@@ -7,6 +7,7 @@ char our_ip[300] = {0};
 blockchain* l_chain;
 dict* chain_nodes;
 list* outbound_msg_queue; //holds outbound message structs
+list* inbound_msg_queue; //holds recieved char* messages to execute
 
 //identifications
 char chain_filename[300];
@@ -21,6 +22,7 @@ dict* out_sockets;
 pthread_mutex_t our_mutex;
 pthread_t inbound_network_thread;
 pthread_t outbound_network_thread;
+pthread_t inbound_executor_thread;
 
 /**
  * SHA256 hashing for input_data
@@ -87,7 +89,6 @@ int proof_of_work(block_t* block){
 void* in_server(){
     int timeout = 50;
     
-    printf("In_server \n");
     socket_in = nn_socket (AF_SP, NN_PULL);
     assert(socket_in >= 0);
     assert(nn_bind(socket_in, our_ip) >= 0);
@@ -104,20 +105,17 @@ void* in_server(){
         if(bytes > 0) {
             buf[bytes] = 0;
             printf("\nRecieved %d bytes: \"%s\"\n", bytes, buf);
-            if(dict_access(chain_nodes, buf+3) == NULL){
-                dict_insert(chain_nodes,buf+3,"datainside",strlen("datainside"));
-                create_socket(buf+3);
-            }
+            li_append(inbound_msg_queue,buf,bytes);
         }
         pthread_mutex_unlock(&our_mutex);            
 
     }
     return 0;
-
 }
 
 void* send_message(list* in_list, li_node* input, void* data){
     int the_socket;
+    int used_rare_socket = 0;
 
     if(input == NULL) return NULL;
 
@@ -125,27 +123,35 @@ void* send_message(list* in_list, li_node* input, void* data){
     if(our_message == NULL) return NULL;
     socket_item* sock_out_to_use = (socket_item*)dict_access(out_sockets,our_message->toWhom);
 
-    //if(our_message->tries == 1) return NULL;
+    if(our_message->tries == 1) return NULL;
 
     the_socket = sock_out_to_use->socket;
 
     printf("Sending to: %s, ",our_message->toWhom);
-    void *msg = nn_allocmsg(strlen(our_message->message),0);
-    strncpy(msg, our_message->message, strlen(our_message->message));
-    int bytes = nn_send (the_socket, &msg, NN_MSG, 0);
-    if (bytes < -3){
-        printf ("nn_send failed: %s\n", nn_strerror (errno));
-        exit(1);
-    }
+    int bytes = nn_send (the_socket,  our_message->message, strlen(our_message->message), 0);
     printf("Bytes sent: %d\n", bytes);
 
     usleep(100);
 
     if(bytes > 0 || our_message->tries == 2) li_delete_node(in_list, input);
     else our_message->tries++;
-    
-    return 0;
 
+
+    return NULL;
+
+
+}
+
+//Send out a ping to all other nodes every 30 seconds 
+int ping_function() {
+
+    if(time(NULL) - last_ping > 30) {
+        printf("Pinging Nodes in List...\n");
+        dict_foreach(chain_nodes,announce_existance, NULL);
+        last_ping = time(NULL);
+    }
+
+    return 1;
 }
 
 //Outbound thread function - tries to send everything in outbound message queue
@@ -154,17 +160,84 @@ void* out_server() {
     while(true) {
         pthread_mutex_lock(&our_mutex);
 
-        pthread_mutex_t message_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-        li_foreach(outbound_msg_queue, send_message, &message_mutex);
-
-        if(time(NULL) - last_ping > 30) {
-            printf("Pinging Nodes in List...\n");
-            dict_foreach(chain_nodes,announce_existance, NULL);
-            last_ping = time(NULL);
-        }
+        li_foreach(outbound_msg_queue, send_message, NULL);
+        ping_function();
         pthread_mutex_unlock(&our_mutex);
 
+        usleep(100);
+    }
+}
+
+//Regster New Node and send out your chain length
+int register_new_node(char* input) {
+
+    if(input == NULL) return ERR_NULL;
+
+    if(!strcmp(input, our_ip)) {
+        printf("Someone is acting on the same IP\n");
+        return 1;
+    }
+
+    if(strlen(input) > SHORT_MESSAGE_LENGTH) {
+        printf("IP address too long to register!");
+        return 0;
+    }
+
+    char add_who[SHORT_MESSAGE_LENGTH] = {0};
+    strcpy(add_who,input);
+    printf("Registering New Node...");
+
+    if(dict_access(chain_nodes, input) != NULL){
+        printf("Already registered. Updating time\n");
+
+        socket_item* our_socket = (socket_item*)dict_access(out_sockets,add_who);
+        if(our_socket != NULL) {
+            our_socket->last_used = time(NULL);
+        }
+    }else{
+        //Add to dict
+        dict_insert(chain_nodes,input,"data",strlen("data"));
+        //Create socket
+        create_socket(input);
+
+    }
+}
+
+//Message type: T: transaction, P: post, B: block, N: new node, L: blockchain length, C: chain
+void process_message(const char* in_msg) {
+    if(in_msg == NULL) return;
+
+    char to_process[MESSAGE_LENGTH] = {0};
+    strcpy(to_process, in_msg);
+
+    char* token = strtok(to_process," ");
+
+    if(!strcmp(token, "N"))
+        register_new_node(to_process + 2);
+}
+
+//Executed the message, input is of type message_item struct
+void* process_inbound(list* in_list, li_node* input, void* data) {
+    if(input == NULL) return NULL;
+
+
+    char the_message[MESSAGE_LENGTH] = {0};
+    //if(input->size > MESSAGE_LENGTH) return NULL;
+    memcpy(the_message,input->data,input->size);
+
+    pthread_mutex_lock(&our_mutex);
+    process_message(the_message);
+    li_delete_node(in_list, input);
+    pthread_mutex_unlock(&our_mutex);
+
+    return NULL;
+}
+
+
+//Executes everything in execution queue + prunes data structures
+void* inbound_executor() {
+    while(true) {
+        li_foreach(inbound_msg_queue, process_inbound, NULL);
         usleep(100);
     }
 }
@@ -191,6 +264,8 @@ int main(int argc, const char* argv[]) {
     out_sockets = dict_create();
     //Create list of outbound msgs & add our ip to be sent to all nodes
     outbound_msg_queue = list_create();
+    //Create execution queue
+    inbound_msg_queue = list_create();
 
     int loc = read_nodes_from_file("nodes.conf", chain_nodes);
     sprintf(our_ip, "ipc:///tmp/pipeline_%d.ipc",loc);
@@ -205,8 +280,18 @@ int main(int argc, const char* argv[]) {
         printf("Mutex Error!\n");
         return ERR_GENERAL;
     }
-    pthread_create(&inbound_network_thread, NULL, in_server,NULL);
-    pthread_create(&outbound_network_thread, NULL, out_server,NULL); //TODO handle response 
+    if((ret = pthread_create(&inbound_network_thread, NULL, &in_server,NULL)) != 0) {
+        printf("Error pthread_create:in");
+        return ret;
+    }
+    if((ret = pthread_create(&outbound_network_thread, NULL, &out_server,NULL)) != 0) {//TODO handle response 
+        printf("Error pthread_create:in");
+        return ret;
+    }
+    if((ret = pthread_create(&inbound_executor_thread, NULL, &inbound_executor,NULL)) != 0) {//TODO handle response 
+        printf("Error pthread_create:in");
+        return ret;
+    }
 
     while(true){
         usleep(3);
@@ -221,3 +306,5 @@ int main(int argc, const char* argv[]) {
     
     return 0;
 }
+
+

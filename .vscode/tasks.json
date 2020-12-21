@@ -15,8 +15,8 @@
 				"-o",
 				"blockchain",
 				"-lcrypto",
-				"-lpthread",
 				"-lanl",
+				"-pthread"
 			],
 			"options": {
 				"cwd": "${workspaceFolder}"
