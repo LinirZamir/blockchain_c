@@ -275,7 +275,7 @@ int main(int argc, const char* argv[]) {
     last_ping = time(NULL);
 
     //pthread_mutex_t our_mutex = PTHREAD_MUTEX_INITIALIZER
-
+    pthread_mutex_init(&our_mutex, NULL);
     if((ret = pthread_create(&inbound_network_thread, NULL, &in_server,NULL)) != 0) {
         printf("Error pthread_create:in");
         return ret;
