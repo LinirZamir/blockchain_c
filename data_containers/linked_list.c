@@ -140,7 +140,7 @@ void li_delete_node(list* in_list, li_node* in_node) {
         return;
 
     else if(in_node->next == NULL && in_node->prev == NULL) {
-        ;
+        in_list->head=NULL;
     }
 
     else if(in_node->next == NULL && in_node->prev != NULL) {
