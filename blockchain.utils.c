@@ -110,7 +110,7 @@ void setup_message(message_item* in_message) {
 int read_nodes_from_file(const char* filename, dict* dict_nodes){
     ///File has to be in ipc:///tmp/pipeline_0.ipc format
     printf("Reading nodes from file: '%s'\n", filename);
-    FILE* chain_file = fopen(filename, "r+");
+    FILE* chain_file = fopen(filename, "ab+");
     if(chain_file == NULL) return ERR_FILE;
     
     char buff[BLOCK_STR_SIZE] = {0};
