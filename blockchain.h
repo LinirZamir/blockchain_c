@@ -62,7 +62,6 @@ typedef struct blockchain {
     int length;
 } blockchain;
 
-
 //utils.c
 blockchain* new_chain();
 block_t* create_new_block(const block_t* prev, const char* data, uint32_t length);

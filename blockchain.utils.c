@@ -19,8 +19,6 @@ blockchain* new_chain()
     return bc;
 }
 
-
-
 /**
  * Adding block to the blockchain
  * 
