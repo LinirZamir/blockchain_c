@@ -103,7 +103,7 @@ void* in_server(){
         
         pthread_mutex_lock(&our_mutex);
         if(bytes > 0) {
-            buf[bytes] = 0;
+            buf[bytes] = '\0';
             printf("\nRecieved %d bytes: \"%s\"\n", bytes, buf);
             li_append(inbound_msg_queue,buf,bytes);
         }
@@ -225,10 +225,8 @@ void* process_inbound(list* in_list, li_node* input, void* data) {
     //if(input->size > MESSAGE_LENGTH) return NULL;
     memcpy(the_message,input->data,input->size);
 
-    pthread_mutex_lock(&our_mutex);
     process_message(the_message);
     li_delete_node(in_list, input);
-    pthread_mutex_unlock(&our_mutex);
 
     return NULL;
 }
@@ -237,7 +235,13 @@ void* process_inbound(list* in_list, li_node* input, void* data) {
 //Executes everything in execution queue + prunes data structures
 void* inbound_executor() {
     while(true) {
+
+        pthread_mutex_lock(&our_mutex);
+
         li_foreach(inbound_msg_queue, process_inbound, NULL);
+
+        pthread_mutex_unlock(&our_mutex);
+
         usleep(100);
     }
 }
