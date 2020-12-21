@@ -10,6 +10,8 @@
 				"blockchain.c",
 				"blockchain.utils.c",
 				"data_containers/dict.c",
+				"data_containers/linked_list.c",
+				"nanomsg/lib/libnanomsg.a",
 				"-o",
 				"blockchain",
 				"-lcrypto",

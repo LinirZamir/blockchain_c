@@ -1,5 +1,9 @@
 #include "blockchain.h"
 
+extern dict* out_sockets;
+extern char our_ip[300];
+extern list* outbound_msg_queue;
+
 /**
  * Creating a new chain list
  * 
@@ -66,6 +70,45 @@ int read_chain_from_file(blockchain* in_chain, const char* filename){
     return ERR_FILE;
 }
 
+//Create a socket to be used for the given address
+int create_socket(const char* input) {
+
+    if(strlen(input) > 299) return 0;
+
+    char address[SHORT_MESSAGE_LENGTH];
+    strcpy(address, input);
+    
+    printf("Creating socket for... %s\n", address);
+
+    socket_item new_out_socket;
+
+    new_out_socket.last_used = time(NULL);
+
+    new_out_socket.socket = nn_socket(AF_SP, NN_PUSH);
+    if(new_out_socket.socket < 0) return 0;
+    int timeout = 100;
+    if(nn_setsockopt(new_out_socket.socket, NN_SOL_SOCKET, NN_SNDTIMEO, &timeout, sizeof(timeout)) < 0) return 0;
+
+    if(nn_connect (new_out_socket.socket, address) < 0){
+        printf("Connection Error.\n");
+        nn_close(new_out_socket.socket);
+    }
+    
+    dict_insert(out_sockets,address,&new_out_socket,sizeof(new_out_socket));
+
+    return 1;
+}
+
+//Empty message struct
+void setup_message(message_item* in_message) {
+    
+    if(in_message == NULL) return;
+
+    in_message->tries = 0;
+    memset(in_message->toWhom, 0, sizeof(in_message->toWhom));
+    return;
+}
+
 int read_nodes_from_file(const char* filename, dict* dict_nodes){
     ///File has to be in ipc:///tmp/pipeline_0.ipc format
     printf("Reading nodes from file: '%s'\n", filename);
@@ -78,6 +121,7 @@ int read_nodes_from_file(const char* filename, dict* dict_nodes){
         if(buff[strlen(buff)-1] == '\n') buff[strlen(buff)-1] = 0; //Check this line
         printf("Reading from file: %s\n", buff);
         dict_insert(dict_nodes,buff,"datainside",strlen("datainside"));
+        create_socket(buff);
     }
     if(buff[0] == 0){
         fprintf(chain_file, "ipc:///tmp/pipeline_0.ipc\n");
@@ -90,4 +134,16 @@ int read_nodes_from_file(const char* filename, dict* dict_nodes){
     }
     fclose (chain_file);
     return ERR_FILE;
+}
+
+int announce_existance(bt_node* in_dict, void* data){
+    if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
+
+    message_item announcement;
+    setup_message(&announcement);
+    strcpy(announcement.toWhom,in_dict->key);
+    strcpy(announcement.message, " P ");
+    strcat(announcement.message, our_ip);
+
+    li_append(outbound_msg_queue,&announcement,sizeof(announcement));
 }
