@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <signal.h> 
 
 #include <openssl/evp.h>
 #include <openssl/err.h>
@@ -52,7 +53,7 @@ typedef struct block_header_t{
 
 typedef struct block_t{
     void * body; 
-    int block_no;
+    struct block_t* next;
     block_header_t header;
 }block_t;
 
@@ -64,13 +65,17 @@ typedef struct blockchain {
 
 //utils.c
 blockchain* new_chain();
-block_t* create_new_block(const block_t* prev, const char* data, uint32_t length);
+block_t* create_new_block(block_t* prev, const char* data, uint32_t length);
 int read_chain_from_file(blockchain* in_chain, const char* filename);
 int read_nodes_from_file(const char* filename, dict* dict_nodes);
 int create_socket(const char* input);
+void setup_message(message_item* in_message) ;
 
 int ping(bt_node* in_dict, void* data);
 int announce_existance(bt_node* in_dict, void* data);
+int announce_exit(bt_node* in_dict, void* data);
+
+int discard_chain(blockchain* in_chain);
 
 //Blockchain.c
 int hash256(const char *input_data, unsigned char *output_data);

@@ -23,24 +23,8 @@ pthread_mutex_t our_mutex;
 pthread_t inbound_network_thread;
 pthread_t outbound_network_thread;
 pthread_t inbound_executor_thread;
+int close_threads;
 
-/**
- * SHA256 hashing for input_data
- * 
- * @param input_data The data to be hashed
- * @param output_data The data output
- * @return Error code
- */
-int hash256(const char *input_data, unsigned char *output_data){
-    int ret = 0;
-
-    size_t len = strlen(input_data);
-    unsigned char tmp [32];
-    SHA256((const unsigned char*)input_data, len, tmp);
-    memcpy(output_data, tmp,32);
-
-    return ret; 
-}
 
 /**
  * Stringify the header
@@ -107,6 +91,10 @@ void* in_server(){
             printf("\nRecieved %d bytes: \"%s\"\n", bytes, buf);
             li_append(inbound_msg_queue,buf,bytes);
         }
+        if(close_threads) {
+                pthread_mutex_unlock(&our_mutex);            
+                return 0;
+        }
         pthread_mutex_unlock(&our_mutex);            
 
     }
@@ -162,10 +150,28 @@ void* out_server() {
 
         li_foreach(outbound_msg_queue, send_message, NULL);
         ping_function();
+
+        if(close_threads) {
+            pthread_mutex_unlock(&our_mutex);
+            return NULL;
+        }
         pthread_mutex_unlock(&our_mutex);
 
         usleep(100);
     }
+}
+
+//Remove node from dict
+int remove_node(char* input){
+    if(input == NULL) return ERR_NULL;
+    printf("Removing Node: %s",input);
+
+    //Remove from chain+socket dict
+    dict_del_elem(chain_nodes,input,0);
+    dict_del_elem(out_sockets, input, 0);
+
+    return 0;
+
 }
 
 //Regster New Node and send out your chain length
@@ -203,6 +209,48 @@ int register_new_node(char* input) {
     }
 }
 
+//Free all outstanding memory
+void shutdown(int dummy) {
+
+    printf("\nCommencing shutdown!\n");
+
+    close_threads = 1;
+
+    //Send out remove existence
+    dict_foreach(chain_nodes,announce_exit, NULL); //TODO Handle receive
+
+    usleep(50);
+
+    pthread_join(outbound_network_thread, NULL);
+    pthread_join(inbound_network_thread, NULL);
+    pthread_join(inbound_executor_thread, NULL);
+
+    pthread_mutex_lock(&our_mutex);
+    
+
+
+    //Discard lists
+    li_discard(outbound_msg_queue);
+    li_discard(inbound_msg_queue);
+
+    //Save blockchain to file
+
+    //Discard blockchain
+    discard_chain(l_chain);
+
+    //Discard keys
+
+    nn_close(socket_in);
+
+    pthread_mutex_unlock(&our_mutex);
+
+    pthread_mutex_destroy(&our_mutex);
+
+    printf("Shutdown complete!\n");
+    exit(0);
+}
+
+
 //Message type: T: transaction, P: post, B: block, N: new node, L: blockchain length, C: chain
 void process_message(const char* in_msg) {
     if(in_msg == NULL) return;
@@ -214,6 +262,8 @@ void process_message(const char* in_msg) {
 
     if(!strcmp(token, "N"))
         register_new_node(to_process + 2);
+    if(!strcmp(token, "D"))
+        remove_node(to_process + 2);
 }
 
 //Executed the message, input is of type message_item struct
@@ -239,7 +289,10 @@ void* inbound_executor() {
         pthread_mutex_lock(&our_mutex);
 
         li_foreach(inbound_msg_queue, process_inbound, NULL);
-
+        if(close_threads) {
+            pthread_mutex_unlock(&our_mutex);
+            return NULL;
+        }
         pthread_mutex_unlock(&our_mutex);
 
         usleep(100);
@@ -249,6 +302,9 @@ void* inbound_executor() {
 int main(int argc, const char* argv[]) {
     int ret = 0;
     
+    //Ctrl-C Handler
+    signal(SIGINT, shutdown);
+
     //load defaults
     strcpy(chain_filename, "chain_0.israft");
 
@@ -281,30 +337,25 @@ int main(int argc, const char* argv[]) {
     //pthread_mutex_t our_mutex = PTHREAD_MUTEX_INITIALIZER
     pthread_mutex_init(&our_mutex, NULL);
     if((ret = pthread_create(&inbound_network_thread, NULL, &in_server,NULL)) != 0) {
-        printf("Error pthread_create:in");
+        printf("Error inbound_network_thread pthread_create:in");
         return ret;
     }
     if((ret = pthread_create(&outbound_network_thread, NULL, &out_server,NULL)) != 0) {//TODO handle response 
-        printf("Error pthread_create:in");
+        printf("Error outbound_network_thread pthread_create:in");
         return ret;
     }
     if((ret = pthread_create(&inbound_executor_thread, NULL, &inbound_executor,NULL)) != 0) {//TODO handle response 
-        printf("Error pthread_create:in");
+        printf("Error inbound_executor_thread pthread_create:in");
         return ret;
     }
+    close_threads = 0;
+
 
     while(true){
         usleep(3);
     };
 
-
-
-    //TODO initiate nanomsg
-    //TODO ping when a new node joins
-
     proof_of_work(l_chain->head);
     
     return 0;
 }
-
-

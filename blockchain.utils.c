@@ -13,11 +13,51 @@ blockchain* new_chain()
 {
     blockchain* bc = malloc(sizeof(blockchain));
     
-    bc->head = create_new_block(NULL, "GENESIS", strlen("GENESIS"));
+    bc->head = create_new_block(NULL, "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks", 69);
     bc->length = 1;
 
     return bc;
 }
+
+
+void block_t_discard_list(block_t* head)
+{   
+    if(head == NULL) return;
+    //Single element sized list
+
+    if(head->next == NULL)
+    {
+        free(head);
+        return;
+    }
+
+    block_t* temp = head;
+    temp = temp->next;
+
+    while(head != NULL)
+    {
+        free(head);
+        head = temp;
+        if(temp != NULL)
+            temp = temp->next;
+    }
+    head = NULL;
+}
+
+//Destroy the chain and free every link in it
+int discard_chain(blockchain* in_chain) {
+
+    if(in_chain == NULL) return 0;
+
+    //Discard list of blocks in chain
+    block_t_discard_list(in_chain->head);
+
+    //Free memory in struct
+    free(in_chain);
+
+    return 1;
+}
+
 
 /**
  * Adding block to the blockchain
@@ -27,8 +67,9 @@ blockchain* new_chain()
  * @param length Length of current block
  * @return New block
  */
-block_t* create_new_block(const block_t* prev, const char* data, uint32_t length){
+block_t* create_new_block(block_t* prev, const char* data, uint32_t length){
     block_t* new_block = malloc(sizeof(block_t));
+
     //new_block->header = malloc(sizeof(block_header_t));
 
     new_block->header.data_length = length;
@@ -38,6 +79,7 @@ block_t* create_new_block(const block_t* prev, const char* data, uint32_t length
 
     if(prev!=NULL){
         hash256((const char *)prev->body,new_block->header.previous_hash);
+        prev->next = new_block;
     }
     else{
         //Genesis block setting
@@ -66,6 +108,25 @@ int read_chain_from_file(blockchain* in_chain, const char* filename){
     }
 
     return ERR_FILE;
+}
+
+
+/**
+ * SHA256 hashing for input_data
+ * 
+ * @param input_data The data to be hashed
+ * @param output_data The data output
+ * @return Error code
+ */
+int hash256(const char *input_data, unsigned char *output_data){
+    int ret = 0;
+
+    size_t len = strlen(input_data);
+    unsigned char tmp [32];
+    SHA256((const unsigned char*)input_data, len, tmp);
+    memcpy(output_data, tmp,32);
+
+    return ret; 
 }
 
 //Create a socket to be used for the given address
@@ -107,6 +168,7 @@ void setup_message(message_item* in_message) {
     return;
 }
 
+//Read the nodes on server, and writes a new self address to file
 int read_nodes_from_file(const char* filename, dict* dict_nodes){
     ///File has to be in ipc:///tmp/pipeline_0.ipc format
     printf("Reading nodes from file: '%s'\n", filename);
@@ -115,20 +177,24 @@ int read_nodes_from_file(const char* filename, dict* dict_nodes){
     
     char buff[BLOCK_STR_SIZE] = {0};
     int curr_index = 0;
+    int counter = 0;
     while(fgets(buff, sizeof(buff), chain_file)){
         if(buff[strlen(buff)-1] == '\n') buff[strlen(buff)-1] = 0; //Check this line
         printf("Reading from file: %s\n", buff);
+        curr_index = atoi(buff+strlen(buff)-5);
         dict_insert(dict_nodes,buff,"datainside",strlen("datainside"));
         create_socket(buff);
+        counter++;
     }
+    //handle empty file
     if(buff[0] == 0){
         fprintf(chain_file, "ipc:///tmp/pipeline_0.ipc\n");
         fclose (chain_file);
         return 0;
     }else{
-        fprintf(chain_file, "ipc:///tmp/pipeline_%d.ipc\n",atoi(buff+strlen(buff)-5)+1);
+        fprintf(chain_file, "ipc:///tmp/pipeline_%d.ipc\n",curr_index+1);
         fclose (chain_file);
-        return atoi(buff+strlen(buff)-5)+1;
+        return curr_index+1;
     }
     fclose (chain_file);
     return ERR_FILE;
@@ -141,6 +207,18 @@ int announce_existance(bt_node* in_dict, void* data){
     setup_message(&announcement);
     strcpy(announcement.toWhom,in_dict->key);
     strcpy(announcement.message, "N ");
+    strcat(announcement.message, our_ip);
+
+    li_append(outbound_msg_queue,&announcement,sizeof(announcement));
+}
+
+int announce_exit(bt_node* in_dict, void* data){
+    if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
+
+    message_item announcement;
+    setup_message(&announcement);
+    strcpy(announcement.toWhom,in_dict->key);
+    strcpy(announcement.message, "D ");
     strcat(announcement.message, our_ip);
 
     li_append(outbound_msg_queue,&announcement,sizeof(announcement));
