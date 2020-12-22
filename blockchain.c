@@ -64,7 +64,7 @@ int proof_of_work(block_t* block){
 
         if(memcmp(tmp, target, sizeof(tmp))<0){
             printf("FOUND!\n");
-            return ret; 
+            return 1; 
         }
     }
     return ret; 
@@ -299,6 +299,23 @@ void* inbound_executor() {
     }
 }
 
+void mine(){
+    int result;
+    printf("Mining started for node: %s", our_ip);
+
+    while(true){
+        unsigned int time_start = time(NULL);
+        result = proof_of_work(l_chain->head);
+        unsigned int time_end = time(NULL);
+    pthread_mutex_lock(&our_mutex);
+    if(result==1){
+        printf("Mined in %f\n", (time_end-time_start)/60);
+    }
+         
+    pthread_mutex_unlock(&our_mutex);
+    }
+}
+
 int main(int argc, const char* argv[]) {
     int ret = 0;
     
@@ -310,7 +327,7 @@ int main(int argc, const char* argv[]) {
 
     //Set PoW algorithm difficulty (0xFF)
     memset(target, 0, sizeof(target));
-    target[2] = 0xFF;
+    target[2] = 0x05;
     
     //Create our blockchain and Process chain file
     int chain_good = read_chain_from_file(l_chain, chain_filename);
@@ -330,7 +347,7 @@ int main(int argc, const char* argv[]) {
     int loc = read_nodes_from_file("nodes.conf", chain_nodes);
     sprintf(our_ip, "ipc:///tmp/pipeline_%d.ipc",loc);
 
-    //Send out our existence
+    //Send out our existence + START GENESIS IF NO BLOCK REPLY
     dict_foreach(chain_nodes,announce_existance, NULL); //TODO Handle receive
     last_ping = time(NULL);
 
@@ -355,7 +372,6 @@ int main(int argc, const char* argv[]) {
         usleep(3);
     };
 
-    proof_of_work(l_chain->head);
     
     return 0;
 }
