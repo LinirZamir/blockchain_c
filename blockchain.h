@@ -27,6 +27,8 @@
 #define BLOCK_STR_SIZE 30000
 #define SHORT_MESSAGE_LENGTH 300
 #define MESSAGE_LENGTH 100000
+#define TRANS_LIST_SIZE 20
+
 
 //Message item structure
 typedef struct message_item {
@@ -56,6 +58,32 @@ typedef struct block_t{
     struct block_t* next;
     block_header_t header;
 }block_t;
+
+////////////// NEW DATA STRUCTURE /////////////////////////
+//Transaction structure
+typedef struct transaction {
+    int time_of;
+    char sender[500];
+    char recipient[500];
+    int amount;
+    char signature[550];
+} transaction;
+
+typedef struct block{
+    unsigned int index;
+    unsigned int time;
+    transaction trans_list[TRANS_LIST_SIZE];
+    unsigned int trans_list_length;
+    char previous_hash[32];
+}block;
+
+//Link in a blockchain
+typedef struct blink {
+    block_t data;
+    struct blink* next;
+} blink;
+
+////////////////////////////////////////////////////////////
 
 //blockchain structure
 typedef struct blockchain {

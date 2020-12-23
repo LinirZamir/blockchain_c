@@ -164,7 +164,7 @@ void* out_server() {
 //Remove node from dict
 int remove_node(char* input){
     if(input == NULL) return ERR_NULL;
-    printf("Removing Node: %s",input);
+    printf("Removing Node: %s\n",input);
 
     //Remove from chain+socket dict
     dict_del_elem(chain_nodes,input,0);
@@ -172,6 +172,27 @@ int remove_node(char* input){
 
     return 0;
 
+}
+
+int update_chain(char* input, int msg_len){
+    if(input == NULL) return ERR_NULL;
+    
+    if(l_chain && l_chain->head->header.data_length>0){
+        printf("Chain already known");
+    }
+
+    printf("\nUpdating chain\n");
+
+    block_t * tmp = malloc(msg_len);
+    memcpy(tmp, input, msg_len);
+
+    discard_chain(l_chain);
+
+    l_chain = malloc(sizeof(blockchain));
+
+    l_chain->head = create_new_block(NULL, input, msg_len);
+    l_chain->length = 1;
+    printf("TEST: %s\n", (char*)l_chain->head->body);
 }
 
 //Regster New Node and send out your chain length
@@ -205,8 +226,19 @@ int register_new_node(char* input) {
         dict_insert(chain_nodes,input,"data",strlen("data"));
         //Create socket
         create_socket(input);
+        //Send updated chain
+        printf("Sending to: %s, ",input);
 
-    }
+        socket_item* input_socket = (socket_item*)dict_access(out_sockets,input);
+        int size = (int)l_chain->head->header.data_length;
+        void* vbuff = malloc(size+2);
+        memcpy(vbuff,"U ", 2);
+        memcpy(vbuff+2,l_chain->head->body, size);       
+        printf("Data to send: %s\n", (char*) vbuff);
+        int bytes = nn_send (input_socket->socket, (void*)vbuff, size+2, 0);
+        printf("Bytes sent: %d\n", bytes);
+        free(vbuff);
+    }   
 }
 
 //Free all outstanding memory
@@ -252,11 +284,13 @@ void shutdown(int dummy) {
 
 
 //Message type: T: transaction, P: post, B: block, N: new node, L: blockchain length, C: chain
-void process_message(const char* in_msg) {
+void process_message(const char* in_msg, int msg_len) {
     if(in_msg == NULL) return;
 
-    char to_process[MESSAGE_LENGTH] = {0};
-    strcpy(to_process, in_msg);
+    if(msg_len<60);
+    char * to_process = malloc(MESSAGE_LENGTH);
+    memset(to_process,0,MESSAGE_LENGTH);
+    memcpy(to_process, in_msg,msg_len);
 
     char* token = strtok(to_process," ");
 
@@ -264,6 +298,10 @@ void process_message(const char* in_msg) {
         register_new_node(to_process + 2);
     if(!strcmp(token, "D"))
         remove_node(to_process + 2);
+
+    if(!strcmp(token, "U"))
+        update_chain(to_process + 2, msg_len-2);
+            
 }
 
 //Executed the message, input is of type message_item struct
@@ -273,9 +311,9 @@ void* process_inbound(list* in_list, li_node* input, void* data) {
 
     char the_message[MESSAGE_LENGTH] = {0};
     //if(input->size > MESSAGE_LENGTH) return NULL;
-    memcpy(the_message,input->data,input->size);
+    strcpy(the_message,(char*)input->data);
 
-    process_message(the_message);
+    process_message(the_message, (int)input->size);
     li_delete_node(in_list, input);
 
     return NULL;
@@ -288,7 +326,9 @@ void* inbound_executor() {
 
         pthread_mutex_lock(&our_mutex);
 
-        li_foreach(inbound_msg_queue, process_inbound, NULL);
+        if(inbound_msg_queue->length>0){
+            li_foreach(inbound_msg_queue, process_inbound, NULL);
+        }
         if(close_threads) {
             pthread_mutex_unlock(&our_mutex);
             return NULL;
@@ -309,7 +349,7 @@ void mine(){
         unsigned int time_end = time(NULL);
     pthread_mutex_lock(&our_mutex);
     if(result==1){
-        printf("Mined in %f\n", (time_end-time_start)/60);
+        printf("Mined in %f\n", (time_end-time_start)/60.0);
     }
          
     pthread_mutex_unlock(&our_mutex);
@@ -329,12 +369,7 @@ int main(int argc, const char* argv[]) {
     memset(target, 0, sizeof(target));
     target[2] = 0x05;
     
-    //Create our blockchain and Process chain file
-    int chain_good = read_chain_from_file(l_chain, chain_filename);
-    if(chain_good!=0) {
-        l_chain = new_chain(); //TODO Write blockchain to file
-    }
-   
+
    //Initialization of nodes on the server
     chain_nodes = dict_create();
     //Create sockets dictionary
@@ -348,7 +383,13 @@ int main(int argc, const char* argv[]) {
     sprintf(our_ip, "ipc:///tmp/pipeline_%d.ipc",loc);
 
     //Send out our existence + START GENESIS IF NO BLOCK REPLY
-    dict_foreach(chain_nodes,announce_existance, NULL); //TODO Handle receive
+    if(dict_foreach(chain_nodes,announce_existance, NULL) == 0) {
+        //Create genesis block
+        printf("First node! Creating genesis block");
+        //Create our blockchain and Process chain file
+        l_chain = new_chain(); //TODO Write blockchain to file
+    }
+    //TODO Handle receive
     last_ping = time(NULL);
 
     //pthread_mutex_t our_mutex = PTHREAD_MUTEX_INITIALIZER
@@ -369,9 +410,8 @@ int main(int argc, const char* argv[]) {
 
 
     while(true){
-        usleep(3);
+        usleep(100000);
     };
 
-    
     return 0;
 }
