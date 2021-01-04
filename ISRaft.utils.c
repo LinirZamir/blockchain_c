@@ -1,4 +1,4 @@
-#include "blockchain.h"
+#include "ISRaft.h"
 
 extern dict* out_sockets;
 extern char our_ip[300];
@@ -9,9 +9,9 @@ extern list* outbound_msg_queue;
  * 
  * @return New allocated list
  */
-blockchain* new_chain()
+datalog* new_chain()
 {
-    blockchain* bc = malloc(sizeof(blockchain));
+    datalog* bc = malloc(sizeof(datalog));
     
     bc->head = create_new_block(NULL, "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks", 69);
     bc->length = 1;
@@ -45,7 +45,7 @@ void block_t_discard_list(block_t* head)
 }
 
 //Destroy the chain and free every link in it
-int discard_chain(blockchain* in_chain) {
+int discard_chain(datalog* in_chain) {
 
     if(in_chain == NULL) return 0;
 
@@ -60,7 +60,7 @@ int discard_chain(blockchain* in_chain) {
 
 
 /**
- * Adding block to the blockchain
+ * Adding block to the datalog
  * 
  * @param prev Previous block to link
  * @param data Data of current block
@@ -94,7 +94,7 @@ block_t* create_new_block(block_t* prev, const char* data, uint32_t length){
     return new_block;
 }
 
-int read_chain_from_file(blockchain* in_chain, const char* filename){
+int read_chain_from_file(datalog* in_chain, const char* filename){
     //TODO fix read_chain func
     printf("Reading chain from file: '%s'\n", filename);
     FILE* chain_file = fopen(filename, "r");
@@ -124,6 +124,7 @@ int hash256(const char *input_data, unsigned char *output_data){
     size_t len = strlen(input_data);
     unsigned char tmp [32];
     SHA256((const unsigned char*)input_data, len, tmp);
+
     memcpy(output_data, tmp,32);
 
     return ret; 
@@ -212,6 +213,19 @@ int announce_existance(bt_node* in_dict, void* data){
     li_append(outbound_msg_queue,&announcement,sizeof(announcement));
 }
 
+int AppendEntries(bt_node* in_dict, void* data){
+    if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
+
+    message_item announcement;
+    setup_message(&announcement);
+    strcpy(announcement.toWhom,in_dict->key);
+    strcpy(announcement.message, "A ");
+    strcat(announcement.message, our_ip);
+
+    li_append(outbound_msg_queue,&announcement,sizeof(announcement));
+}
+
+
 int announce_exit(bt_node* in_dict, void* data){
     if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
 
@@ -219,6 +233,18 @@ int announce_exit(bt_node* in_dict, void* data){
     setup_message(&announcement);
     strcpy(announcement.toWhom,in_dict->key);
     strcpy(announcement.message, "D ");
+    strcat(announcement.message, our_ip);
+
+    li_append(outbound_msg_queue,&announcement,sizeof(announcement));
+}
+
+int announce_mined(bt_node* in_dict, void* data){
+    if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
+
+    message_item announcement;
+    setup_message(&announcement);
+    strcpy(announcement.toWhom,in_dict->key);
+    strcpy(announcement.message, "B ");
     strcat(announcement.message, our_ip);
 
     li_append(outbound_msg_queue,&announcement,sizeof(announcement));

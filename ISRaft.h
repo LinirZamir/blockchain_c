@@ -77,7 +77,7 @@ typedef struct block{
     char previous_hash[32];
 }block;
 
-//Link in a blockchain
+//Link in a datalog
 typedef struct blink {
     block_t data;
     struct blink* next;
@@ -85,25 +85,29 @@ typedef struct blink {
 
 ////////////////////////////////////////////////////////////
 
-//blockchain structure
-typedef struct blockchain {
+//datalog structure
+typedef struct datalog {
     block_t* head;
     int length;
-} blockchain;
+} datalog;
 
 //utils.c
-blockchain* new_chain();
+datalog* new_chain();
 block_t* create_new_block(block_t* prev, const char* data, uint32_t length);
-int read_chain_from_file(blockchain* in_chain, const char* filename);
+int read_chain_from_file(datalog* in_chain, const char* filename);
 int read_nodes_from_file(const char* filename, dict* dict_nodes);
 int create_socket(const char* input);
 void setup_message(message_item* in_message) ;
 
 int ping(bt_node* in_dict, void* data);
 int announce_existance(bt_node* in_dict, void* data);
+
+int AppendEntries(bt_node* in_dict, void* data);
+
 int announce_exit(bt_node* in_dict, void* data);
+int announce_mined(bt_node* in_dict, void* data);
 
-int discard_chain(blockchain* in_chain);
+int discard_chain(datalog* in_chain);
 
-//Blockchain.c
+//ISRaft.c
 int hash256(const char *input_data, unsigned char *output_data);

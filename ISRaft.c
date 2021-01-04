@@ -1,10 +1,10 @@
-#include "blockchain.h"
+#include "ISRaft.h"
 
 //This nodes IP
 char our_ip[300] = {0};
 
-//Blockchain
-blockchain* l_chain;
+//datalog
+datalog* l_chain;
 dict* chain_nodes;
 list* outbound_msg_queue; //holds outbound message structs
 list* inbound_msg_queue; //holds recieved char* messages to execute
@@ -25,6 +25,9 @@ pthread_t outbound_network_thread;
 pthread_t inbound_executor_thread;
 int close_threads;
 
+//Self Properties
+int leader; 
+int live = 1;
 
 /**
  * Stringify the header
@@ -50,25 +53,6 @@ char* header_to_string(block_header_t head){
     return output;
 }
 
-int proof_of_work(block_t* block){
-    int ret = 0;
-    unsigned char *tmp; 
-    char* header_string;
-    
-    tmp = malloc(32);
-    
-    for(int i= 0; i<UINT32_MAX; i++){
-        block->header.nounce = (uint32_t)i;
-        header_string = header_to_string(block->header);
-        hash256(header_string,tmp);
-
-        if(memcmp(tmp, target, sizeof(tmp))<0){
-            printf("FOUND!\n");
-            return 1; 
-        }
-    }
-    return ret; 
-}
 
 void* in_server(){
     int timeout = 50;
@@ -93,12 +77,12 @@ void* in_server(){
         }
         if(close_threads) {
                 pthread_mutex_unlock(&our_mutex);            
-                return 0;
+                return NULL;
         }
         pthread_mutex_unlock(&our_mutex);            
 
     }
-    return 0;
+    return NULL;
 }
 
 void* send_message(list* in_list, li_node* input, void* data){
@@ -130,14 +114,14 @@ void* send_message(list* in_list, li_node* input, void* data){
 
 }
 
-//Send out a ping to all other nodes every 30 seconds 
-int ping_function() {
+//Send out a ping to all other nodes every cycle of time
+int heartbeat_function() {
 
-    if(time(NULL) - last_ping > 30) {
-        printf("Pinging Nodes in List...\n");
-        dict_foreach(chain_nodes,announce_existance, NULL);
+    if((time(NULL) - last_ping > 1) && leader==1) {
+        printf("Heartbeat message sent\n");
+        dict_foreach(chain_nodes,AppendEntries, NULL);
         last_ping = time(NULL);
-    }
+    }  
 
     return 1;
 }
@@ -148,8 +132,18 @@ void* out_server() {
     while(true) {
         pthread_mutex_lock(&our_mutex);
 
-        li_foreach(outbound_msg_queue, send_message, NULL);
-        ping_function();
+        pthread_mutex_t message_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+        li_foreach(outbound_msg_queue, send_message, &message_mutex);
+        
+        if(live){
+            printf("Let others know of self");
+            dict_foreach(chain_nodes,announce_existance, NULL);
+            live = 0;
+        }
+
+        heartbeat_function();
+
 
         if(close_threads) {
             pthread_mutex_unlock(&our_mutex);
@@ -188,7 +182,7 @@ int update_chain(char* input, int msg_len){
 
     discard_chain(l_chain);
 
-    l_chain = malloc(sizeof(blockchain));
+    l_chain = malloc(sizeof(datalog));
 
     l_chain->head = create_new_block(NULL, input, msg_len);
     l_chain->length = 1;
@@ -231,9 +225,9 @@ int register_new_node(char* input) {
 
         socket_item* input_socket = (socket_item*)dict_access(out_sockets,input);
         int size = (int)l_chain->head->header.data_length;
-        void* vbuff = malloc(size+2);
+        void* vbuff = malloc((l_chain->length*sizeof(block_t)) +2);
         memcpy(vbuff,"U ", 2);
-        memcpy(vbuff+2,l_chain->head->body, size);       
+        memcpy(vbuff+2,l_chain, l_chain->length*sizeof(block_t));       
         printf("Data to send: %s\n", (char*) vbuff);
         int bytes = nn_send (input_socket->socket, (void*)vbuff, size+2, 0);
         printf("Bytes sent: %d\n", bytes);
@@ -249,25 +243,25 @@ void shutdown(int dummy) {
     close_threads = 1;
 
     //Send out remove existence
-    dict_foreach(chain_nodes,announce_exit, NULL); //TODO Handle receive
+    dict_foreach(chain_nodes,announce_exit, NULL);
 
-    usleep(50);
+    usleep(100);
 
     pthread_join(outbound_network_thread, NULL);
     pthread_join(inbound_network_thread, NULL);
     pthread_join(inbound_executor_thread, NULL);
 
-    pthread_mutex_lock(&our_mutex);
-    
+    printf("\nThreads Joined!\n");
 
+    pthread_mutex_lock(&our_mutex);
 
     //Discard lists
     li_discard(outbound_msg_queue);
     li_discard(inbound_msg_queue);
 
-    //Save blockchain to file
+    //Save datalog to file
 
-    //Discard blockchain
+    //Discard datalog
     discard_chain(l_chain);
 
     //Discard keys
@@ -277,13 +271,13 @@ void shutdown(int dummy) {
     pthread_mutex_unlock(&our_mutex);
 
     pthread_mutex_destroy(&our_mutex);
-
+    
     printf("Shutdown complete!\n");
     exit(0);
+
 }
 
-
-//Message type: T: transaction, P: post, B: block, N: new node, L: blockchain length, C: chain
+//Message type: T: transaction, P: post, B: block, N: new node, L: datalog length, C: chain
 void process_message(const char* in_msg, int msg_len) {
     if(in_msg == NULL) return;
 
@@ -298,23 +292,26 @@ void process_message(const char* in_msg, int msg_len) {
         register_new_node(to_process + 2);
     if(!strcmp(token, "D"))
         remove_node(to_process + 2);
-
     if(!strcmp(token, "U"))
         update_chain(to_process + 2, msg_len-2);
-            
 }
+
+
 
 //Executed the message, input is of type message_item struct
 void* process_inbound(list* in_list, li_node* input, void* data) {
     if(input == NULL) return NULL;
 
+    pthread_mutex_t* the_mutex = (pthread_mutex_t*)data;
 
     char the_message[MESSAGE_LENGTH] = {0};
     //if(input->size > MESSAGE_LENGTH) return NULL;
     strcpy(the_message,(char*)input->data);
 
+    pthread_mutex_lock(the_mutex);
     process_message(the_message, (int)input->size);
     li_delete_node(in_list, input);
+    pthread_mutex_unlock(the_mutex);
 
     return NULL;
 }
@@ -324,11 +321,14 @@ void* process_inbound(list* in_list, li_node* input, void* data) {
 void* inbound_executor() {
     while(true) {
 
-        pthread_mutex_lock(&our_mutex);
 
         if(inbound_msg_queue->length>0){
-            li_foreach(inbound_msg_queue, process_inbound, NULL);
+            li_foreach(inbound_msg_queue, process_inbound, &our_mutex);
         }
+
+        pthread_mutex_lock(&our_mutex);
+
+
         if(close_threads) {
             pthread_mutex_unlock(&our_mutex);
             return NULL;
@@ -341,19 +341,14 @@ void* inbound_executor() {
 
 void mine(){
     int result;
-    printf("Mining started for node: %s", our_ip);
+    int count = 0;
+    printf("Node : %s started \n", our_ip);
 
-    while(true){
-        unsigned int time_start = time(NULL);
-        result = proof_of_work(l_chain->head);
-        unsigned int time_end = time(NULL);
-    pthread_mutex_lock(&our_mutex);
-    if(result==1){
-        printf("Mined in %f\n", (time_end-time_start)/60.0);
-    }
-         
-    pthread_mutex_unlock(&our_mutex);
-    }
+    while(true);
+    //Node sends request vote if he didn't get any appendentreis from leader. 
+    //He then send RequestVote in time intervals, until either he gets the majority of the responds, or he get the AppendEntries message from a claimed leader. 
+
+
 }
 
 int main(int argc, const char* argv[]) {
@@ -364,11 +359,6 @@ int main(int argc, const char* argv[]) {
 
     //load defaults
     strcpy(chain_filename, "chain_0.israft");
-
-    //Set PoW algorithm difficulty (0xFF)
-    memset(target, 0, sizeof(target));
-    target[2] = 0x05;
-    
 
    //Initialization of nodes on the server
     chain_nodes = dict_create();
@@ -385,12 +375,14 @@ int main(int argc, const char* argv[]) {
     //Send out our existence + START GENESIS IF NO BLOCK REPLY
     if(dict_foreach(chain_nodes,announce_existance, NULL) == 0) {
         //Create genesis block
-        printf("First node! Creating genesis block");
-        //Create our blockchain and Process chain file
-        l_chain = new_chain(); //TODO Write blockchain to file
+        printf("First node! Creating genesis block\n");
+        //Create our datalog and Process chain file
+        l_chain = new_chain(); //TODO Write datalog to file
     }
     //TODO Handle receive
     last_ping = time(NULL);
+    //Starting as a candidate
+    leader = 0;
 
     //pthread_mutex_t our_mutex = PTHREAD_MUTEX_INITIALIZER
     pthread_mutex_init(&our_mutex, NULL);
@@ -407,11 +399,8 @@ int main(int argc, const char* argv[]) {
         return ret;
     }
     close_threads = 0;
-
-
-    while(true){
-        usleep(100000);
-    };
+    
+    mine();
 
     return 0;
 }

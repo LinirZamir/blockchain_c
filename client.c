@@ -1,4 +1,4 @@
-#include "blockchain.h"
+#include "ISRaft.h"
 
 char our_ip[300];
 int last_check;
@@ -37,7 +37,7 @@ int read_othernodes_from_file(const char* filename, dict* dict_nodes){
 void display_help(){
     printf("Help/Commands: 'h'\n"); //Show Help
     printf("Test connection: 't'\n"); //Show Help
-    printf("Transactions: 'r'\n");  //Show transactions on blockchain
+    printf("Transactions: 'r'\n");  //Show transactions on datalog
     printf("Post transaction: 'p sender amount receiver'\n"); //Send currency between nodes
     printf("Quit program: 'q'\n"); //Quit
 }
@@ -110,7 +110,7 @@ int main(){
     int ret = 0;
     char buffer[120] = "";
 
-    printf("Blockchain implementation in C\n'h' for help/commends\n");
+    printf("ISRaft implementation in C\n'h' for help/commends\n");
 
     //Initialization of nodes on the server
     chain_nodes = dict_create();
