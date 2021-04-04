@@ -117,7 +117,7 @@ void* send_message(list* in_list, li_node* input, void* data){
 //Send out a ping to all other nodes every cycle of time
 int heartbeat_function() {
 
-    if((time(NULL) - last_ping > 1) && leader==1) {
+    if((time(NULL) - last_ping > 1)) {
         printf("Heartbeat message sent\n");
         dict_foreach(chain_nodes,AppendEntries, NULL);
         last_ping = time(NULL);
@@ -354,6 +354,25 @@ void mine(){
 int main(int argc, const char* argv[]) {
     int ret = 0;
     
+    //Create RS Keypair
+    EVP_PKEY *pkey;
+    pkey = EVP_PKEY_new();
+    BIGNUM *bn;
+    bn = BN_new();
+    BN_set_word(bn, RSA_F4);
+    RSA *rsa;
+    rsa = RSA_new();
+    
+    ret = RSA_generate_key_ex(
+        rsa,  /* pointer to the RSA structure */
+        2048, /* number of bits for the key - 2048 is a good value */
+        bn,   /* exponent allocated earlier */
+        NULL /* callback - can be NULL if progress isn't needed */
+    );   
+
+    EVP_PKEY_assign_RSA(pkey, rsa);
+
+
     //Ctrl-C Handler
     signal(SIGINT, shutdown);
 
@@ -378,6 +397,8 @@ int main(int argc, const char* argv[]) {
         printf("First node! Creating genesis block\n");
         //Create our datalog and Process chain file
         l_chain = new_chain(); //TODO Write datalog to file
+    } else{
+        live = 0;
     }
     //TODO Handle receive
     last_ping = time(NULL);
