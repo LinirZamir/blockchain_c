@@ -16,18 +16,37 @@
 
 #include "data_containers/dict.h"
 #include "data_containers/linked_list.h"
+#include "data_containers/log.h"
 
 #include "nanomsg/include/nn.h"
 #include "nanomsg/include/pipeline.h"
 
-#define ERR_NULL 2
-#define ERR_FILE 3
-#define ERR_GENERAL 4
-
-#define BLOCK_STR_SIZE 30000
-#define SHORT_MESSAGE_LENGTH 300
+//Default sizes
+#define DEFAULT_STR_SIZE 1024
+#define ADDRESS_SIZE 64
+#define TIMEOUT 50
 #define MESSAGE_LENGTH 100000
-#define TRANS_LIST_SIZE 20
+
+//Error definition
+#define ERR_FILE 2
+#define ERR_LENGTH 3
+#define ERR_SOCKET 4
+#define ERR_NULL 5
+#define ERR_GENERAL 6
+
+////////////////////////////////////////////////////////////
+//Socket struct
+typedef struct socket_item {
+    int socket;
+    unsigned int last_used;
+} socket_item;
+
+typedef struct raft_node {
+    char ip_address[64];
+    char public_key[64];
+    socket_item* socket_it;
+    int leader; //0 - no, 1 - yes
+}raft_node;
 
 
 //Message item structure
@@ -37,77 +56,27 @@ typedef struct message_item {
     unsigned int tries;
 } message_item;
 
-//Socket struct
-typedef struct socket_item {
-    int socket;
-    unsigned int last_used;
-} socket_item;
 
-/////////////////////////////////////////////////////////
-typedef struct block_header_t{
-    uint32_t data_length;
-    uint32_t timestamp;
-    uint32_t nounce;
 
-    unsigned char data_hash[32];
-    unsigned char previous_hash[32];  
-}block_header_t;
-
-typedef struct block_t{
-    void * body; 
-    struct block_t* next;
-    block_header_t header;
-}block_t;
-
-////////////// NEW DATA STRUCTURE /////////////////////////
-//Transaction structure
-typedef struct transaction {
-    int time_of;
-    char sender[500];
-    char recipient[500];
-    int amount;
-    char signature[550];
-} transaction;
-
-typedef struct block{
-    unsigned int index;
-    unsigned int time;
-    transaction trans_list[TRANS_LIST_SIZE];
-    unsigned int trans_list_length;
-    char previous_hash[32];
-}block;
-
-//Link in a datalog
-typedef struct blink {
-    block_t data;
-    struct blink* next;
-} blink;
-
-////////////////////////////////////////////////////////////
-
-//datalog structure
-typedef struct datalog {
-    block_t* head;
-    int length;
-} datalog;
-
-//utils.c
-datalog* new_chain();
-block_t* create_new_block(block_t* prev, const char* data, uint32_t length);
-int read_chain_from_file(datalog* in_chain, const char* filename);
-int read_nodes_from_file(const char* filename, dict* dict_nodes);
-int create_socket(const char* input);
-void setup_message(message_item* in_message) ;
-
-int ping(bt_node* in_dict, void* data);
+//messages.c
 int announce_existance(bt_node* in_dict, void* data);
 
-int AppendEntries(bt_node* in_dict, void* data);
+//utils.c
+int add_node_to_dict(char* server_address, dict* chain_nodes);
+int read_nodes_from_file(const char* filename, dict* chain_nodes);
+int create_raft_socket(const char* input, socket_item** sock_item);
+int setup_message(message_item* in_message);
+void shutdown(int dummy);
+void* send_message(list* in_list, li_node* input, void* data);
+void* process_inbound(list* in_list, li_node* input, void* data);
 
-int announce_exit(bt_node* in_dict, void* data);
-int announce_mined(bt_node* in_dict, void* data);
+//sockets.c
+void* in_server();
+void* out_server();
+void* inbound_executor();
 
-int discard_chain(datalog* in_chain);
+//messages.process.c
+int register_new_node(char* input);
+void process_message(const char* in_msg, int msg_len);
 
 //ISRaft.c
-int hash256(const char *input_data, unsigned char *output_data);

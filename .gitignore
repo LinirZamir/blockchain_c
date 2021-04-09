@@ -2,3 +2,5 @@ israft
 ISRaft
 nodes.conf
 .vscode/
+*.pem
+tmp/

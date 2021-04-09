@@ -1,251 +1,143 @@
 #include "ISRaft.h"
 
-extern dict* out_sockets;
-extern char our_ip[300];
-extern list* outbound_msg_queue;
+extern char this_ip[ADDRESS_SIZE];
 
-/**
- * Creating a new chain list
- * 
- * @return New allocated list
- */
-datalog* new_chain()
-{
-    datalog* bc = malloc(sizeof(datalog));
-    
-    bc->head = create_new_block(NULL, "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks", 69);
-    bc->length = 1;
-
-    return bc;
-}
-
-
-void block_t_discard_list(block_t* head)
-{   
-    if(head == NULL) return;
-    //Single element sized list
-
-    if(head->next == NULL)
-    {
-        free(head);
-        return;
-    }
-
-    block_t* temp = head;
-    temp = temp->next;
-
-    while(head != NULL)
-    {
-        free(head);
-        head = temp;
-        if(temp != NULL)
-            temp = temp->next;
-    }
-    head = NULL;
-}
-
-//Destroy the chain and free every link in it
-int discard_chain(datalog* in_chain) {
-
-    if(in_chain == NULL) return 0;
-
-    //Discard list of blocks in chain
-    block_t_discard_list(in_chain->head);
-
-    //Free memory in struct
-    free(in_chain);
-
-    return 1;
-}
-
-
-/**
- * Adding block to the datalog
- * 
- * @param prev Previous block to link
- * @param data Data of current block
- * @param length Length of current block
- * @return New block
- */
-block_t* create_new_block(block_t* prev, const char* data, uint32_t length){
-    block_t* new_block = malloc(sizeof(block_t));
-
-    //new_block->header = malloc(sizeof(block_header_t));
-
-    new_block->header.data_length = length;
-    
-    new_block->header.timestamp = (uint32_t)time(NULL); 
-    new_block->header.nounce = (uint32_t)0;
-
-    if(prev!=NULL){
-        hash256((const char *)prev->body,new_block->header.previous_hash);
-        prev->next = new_block;
-    }
-    else{
-        //Genesis block setting
-        memset(new_block->header.previous_hash, 0, sizeof(new_block->header.previous_hash));
-    }
-    //Hashing the data of current block
-    hash256(data,new_block->header.data_hash);
-    
-    //Data to body
-    new_block->body = (void*) data;
-
-    return new_block;
-}
-
-int read_chain_from_file(datalog* in_chain, const char* filename){
-    //TODO fix read_chain func
-    printf("Reading chain from file: '%s'\n", filename);
-    FILE* chain_file = fopen(filename, "r");
-    if(chain_file == NULL) return ERR_FILE;
-    
-    char buff[BLOCK_STR_SIZE] = {0};
-    int curr_index = 0;
-    while(fgets(buff, sizeof(buff), chain_file)){
-        if(buff[strlen(buff)-1] == '\n') buff[strlen(buff)-1] = 0; //Check this line
-        printf("Reading from file: %s\n", buff);
-    }
-
-    return ERR_FILE;
-}
-
-
-/**
- * SHA256 hashing for input_data
- * 
- * @param input_data The data to be hashed
- * @param output_data The data output
- * @return Error code
- */
-int hash256(const char *input_data, unsigned char *output_data){
+int add_node_to_dict(char* server_address, dict* chain_nodes){
     int ret = 0;
+    raft_node* rn;
+    socket_item* sock_item;
 
-    size_t len = strlen(input_data);
-    unsigned char tmp [32];
-    SHA256((const unsigned char*)input_data, len, tmp);
-
-    memcpy(output_data, tmp,32);
-
-    return ret; 
-}
-
-//Create a socket to be used for the given address
-int create_socket(const char* input) {
-
-    if(strlen(input) > 299) return 0;
-
-    char address[SHORT_MESSAGE_LENGTH];
-    strcpy(address, input);
-    
-    printf("Creating socket for... %s\n", address);
-
-    socket_item new_out_socket;
-
-    new_out_socket.last_used = time(NULL);
-
-    new_out_socket.socket = nn_socket(AF_SP, NN_PUSH);
-    if(new_out_socket.socket < 0) return 0;
-    int timeout = 100;
-    if(nn_setsockopt(new_out_socket.socket, NN_SOL_SOCKET, NN_SNDTIMEO, &timeout, sizeof(timeout)) < 0) return 0;
-
-    if(nn_connect (new_out_socket.socket, address) < 0){
-        printf("Connection Error.\n");
-        nn_close(new_out_socket.socket);
+    rn = calloc(1,sizeof(raft_node));
+    strcpy(rn->ip_address,server_address);
+    //ADD SOCKET HANDLE
+    if((ret = create_raft_socket(server_address,&sock_item))!=0){
+        free(rn);
+        return ret;
     }
-    
-    dict_insert(out_sockets,address,&new_out_socket,sizeof(new_out_socket));
-
-    return 1;
-}
-
-//Empty message struct
-void setup_message(message_item* in_message) {
-    
-    if(in_message == NULL) return;
-
-    in_message->tries = 0;
-    memset(in_message->toWhom, 0, sizeof(in_message->toWhom));
-    return;
+    rn->socket_it = sock_item;
+    dict_insert(chain_nodes,server_address,rn,sizeof(raft_node));
+    free(rn);
+    return ret;
 }
 
 //Read the nodes on server, and writes a new self address to file
-int read_nodes_from_file(const char* filename, dict* dict_nodes){
-    ///File has to be in ipc:///tmp/pipeline_0.ipc format
-    printf("Reading nodes from file: '%s'\n", filename);
-    FILE* chain_file = fopen(filename, "ab+");
-    if(chain_file == NULL) return ERR_FILE;
-    
-    char buff[BLOCK_STR_SIZE] = {0};
-    int curr_index = 0;
-    int counter = 0;
+int read_nodes_from_file(const char* filename, dict* chain_nodes){
+    FILE* chain_file;
+    socket_item* sock_item;
+    char buff[DEFAULT_STR_SIZE] = {0};
+    int curr_index = -1;
+    char char_index[20] = {0};
+    int ret = 0;
+
+    ///File has to be with:///tmp/pipeline_0.ipc format
+    log_trace("Reading nodes from file: '%s'", filename);
+
+    chain_file = fopen(filename, "ab+");
+    if(chain_file == NULL){
+        log_error("Unable to create a file: %s",filename);
+        return ERR_FILE;
+    }
+
     while(fgets(buff, sizeof(buff), chain_file)){
         if(buff[strlen(buff)-1] == '\n') buff[strlen(buff)-1] = 0; //Check this line
-        printf("Reading from file: %s\n", buff);
         curr_index = atoi(buff+strlen(buff)-5);
-        dict_insert(dict_nodes,buff,"datainside",strlen("datainside"));
-        create_socket(buff);
-        counter++;
+
+        add_node_to_dict(buff,chain_nodes);
     }
     //handle empty file
-    if(buff[0] == 0){
-        fprintf(chain_file, "ipc:///tmp/pipeline_0.ipc\n");
-        fclose (chain_file);
-        return 0;
-    }else{
-        fprintf(chain_file, "ipc:///tmp/pipeline_%d.ipc\n",curr_index+1);
-        fclose (chain_file);
-        return curr_index+1;
-    }
+
+    fprintf(chain_file, "ipc:///tmp/pipeline_%d.ipc\n",curr_index+1);
+    sprintf(this_ip, "ipc:///tmp/pipeline_%d.ipc",curr_index+1);
+    log_trace("This servers IP: %s", this_ip);
     fclose (chain_file);
-    return ERR_FILE;
+    return ret;
 }
 
-int announce_existance(bt_node* in_dict, void* data){
-    if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
+//Create a socket to be used for the given address
+int create_raft_socket(const char* input, socket_item** sock_item) {
+    int timeout = 100;
+    int ret = 0;
+    socket_item* new_out_socket;
 
-    message_item announcement;
-    setup_message(&announcement);
-    strcpy(announcement.toWhom,in_dict->key);
-    strcpy(announcement.message, "N ");
-    strcat(announcement.message, our_ip);
+    if(strlen(input) > 299) return ERR_LENGTH;
 
-    li_append(outbound_msg_queue,&announcement,sizeof(announcement));
+    log_trace("Creating socket for: %s", input);
+    new_out_socket = malloc(sizeof(socket_item));
+
+
+    new_out_socket->last_used = time(NULL); //Set current time as the time last used. 
+    new_out_socket->socket = nn_socket(AF_SP, NN_PUSH);
+
+    if(new_out_socket->socket < 0) {
+        free(new_out_socket);
+        return ERR_SOCKET;
+    }
+    if(nn_setsockopt(new_out_socket->socket, NN_SOL_SOCKET, NN_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        free(new_out_socket);
+        return ERR_SOCKET;
+    }
+
+    if(nn_connect (new_out_socket->socket, input) < 0){
+        log_error("Socket Connection Error");
+        ret = ERR_SOCKET;
+        nn_close(new_out_socket->socket);
+    }
+
+    *sock_item = new_out_socket;
+    return ret;
 }
 
-int AppendEntries(bt_node* in_dict, void* data){
-    if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
+//Empty message init
+int setup_message(message_item* in_message) {
 
-    message_item announcement;
-    setup_message(&announcement);
-    strcpy(announcement.toWhom,in_dict->key);
-    strcpy(announcement.message, "A ");
-    strcat(announcement.message, our_ip);
+    if(in_message == NULL) return ERR_NULL;
 
-    li_append(outbound_msg_queue,&announcement,sizeof(announcement));
+    in_message->tries = 0;
+    memset(in_message->toWhom, 0, sizeof(in_message->toWhom));
+    return 0;
 }
 
+void* send_message(list* in_list, li_node* input, void* data){
+    int socket_handler;
+    int used_rare_socket = 0;
+    int bytes;
+    message_item* new_message;
+    raft_node* node;
 
-int announce_exit(bt_node* in_dict, void* data){
-    if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
+    if(input == NULL) goto end_send_message;
 
-    message_item announcement;
-    setup_message(&announcement);
-    strcpy(announcement.toWhom,in_dict->key);
-    strcpy(announcement.message, "D ");
-    strcat(announcement.message, our_ip);
+    if((new_message = (message_item*)input->data) == NULL) goto end_send_message;
+    if((node = (raft_node*)dict_access((dict*)data,new_message->toWhom)) == NULL) log_error("Node is NULL");
 
-    li_append(outbound_msg_queue,&announcement,sizeof(announcement));
+    socket_handler = node->socket_it->socket;
+    bytes = nn_send (socket_handler,  new_message->message, strlen(new_message->message), 0);
+
+    log_info("Sending to: %s, Bytes sent: %d", new_message->toWhom, bytes);
+
+    usleep(100);
+
+    if(bytes > 0 || new_message->tries == 2) li_delete_node(in_list, input);
+    else new_message->tries++;
+
+end_send_message:
+
+    return NULL;
 }
 
-int announce_mined(bt_node* in_dict, void* data){
-    if(in_dict == NULL || in_dict->size > 300) return ERR_NULL;
+//Executed the message, input is of type message_item struct
+void* process_inbound(list* in_list, li_node* input, void* data) {
+    if(input == NULL) return NULL;
 
-    message_item announcement;
-    setup_message(&announcement);
-    strcpy(announcement.toWhom,in_dict->key);
-    strcpy(announcement.message, "B ");
-    strcat(announcement.message, our_ip);
+    pthread_mutex_t* the_mutex = (pthread_mutex_t*)data;
 
-    li_append(outbound_msg_queue,&announcement,sizeof(announcement));
+    char the_message[MESSAGE_LENGTH] = {0};
+    //if(input->size > MESSAGE_LENGTH) return NULL;
+    strcpy(the_message,(char*)input->data);
+
+    pthread_mutex_lock(the_mutex);
+    process_message(the_message, (int)input->size);
+    li_delete_node(in_list, input);
+    pthread_mutex_unlock(the_mutex);
+
+    return NULL;
 }
