@@ -1,6 +1,7 @@
 #include "ISRaft.h"
 
 extern char this_ip[ADDRESS_SIZE];
+extern int total_votes;
 
 int add_node_to_dict(char* server_address, dict* chain_nodes){
     int ret = 0;
@@ -140,4 +141,19 @@ void* process_inbound(list* in_list, li_node* input, void* data) {
     pthread_mutex_unlock(the_mutex);
 
     return NULL;
+}
+
+int check_total_votes(bt_node* in_dict, void* data){
+    raft_node * rn = (raft_node*)in_dict->data;
+    if(rn->voted_for_self == 1){
+        total_votes++;
+    }
+    return 0;
+}
+
+int reset_votes(bt_node* in_dict, void* data){
+    raft_node * rn = (raft_node*)in_dict->data;
+    rn->voted_for_self = 0;
+    total_votes = 0;
+    return 0;
 }

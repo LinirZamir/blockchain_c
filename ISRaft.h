@@ -26,6 +26,7 @@
 #define ADDRESS_SIZE 64
 #define TIMEOUT 50
 #define MESSAGE_LENGTH 100000
+#define ELECTION_TIMEOUT 3000 //Added randomness when called
 
 //Error definition
 #define ERR_FILE 2
@@ -46,6 +47,7 @@ typedef struct raft_node {
     char public_key[64];
     socket_item* socket_it;
     int leader; //0 - no, 1 - yes
+    int voted_for_self; //0 - no, 1 - yes
 }raft_node;
 
 
@@ -60,6 +62,10 @@ typedef struct message_item {
 
 //messages.c
 int announce_existance(bt_node* in_dict, void* data);
+int announce_exit(bt_node* in_dict, void* data);
+int request_vote(bt_node* in_dict, void* data);
+int heartbeat(bt_node* in_dict, void* data);
+int vote_yes(raft_node* in_dict, void* data);
 
 //utils.c
 int add_node_to_dict(char* server_address, dict* chain_nodes);
@@ -69,6 +75,8 @@ int setup_message(message_item* in_message);
 void shutdown(int dummy);
 void* send_message(list* in_list, li_node* input, void* data);
 void* process_inbound(list* in_list, li_node* input, void* data);
+int check_total_votes(bt_node* in_dict, void* data);
+int reset_votes(bt_node* in_dict, void* data);
 
 //sockets.c
 void* in_server();

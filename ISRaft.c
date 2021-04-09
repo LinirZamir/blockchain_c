@@ -5,10 +5,14 @@ dict* chain_nodes;
 list* outbound_msg_queue; //holds outbound message structs
 list* inbound_msg_queue; //holds recieved char* messages to execute
 int total_nodes = 1;
+raft_node* elected_node;
 
 //Self Properties
 char this_ip[ADDRESS_SIZE] = {0};
 int socket_in;
+int heartbeat_timer;
+int self_status = 0; //0 - follower, 1 - candidate, 2 - leader
+int total_votes = 0;
 
 //Threads
 pthread_mutex_t our_mutex;
@@ -22,6 +26,9 @@ void shutdown(int dummy) {
     log_info("Commencing shutdown!");
 
     close_threads = 1;
+
+    //Send out remove existence
+    dict_foreach(chain_nodes,announce_exit, NULL);
 
     pthread_join(outbound_network_thread, NULL);
     pthread_join(inbound_network_thread, NULL);
@@ -51,6 +58,7 @@ void shutdown(int dummy) {
 
 int main(int argc, const char* argv[]) {
     int ret;
+    time_t t;
 
     //TODO - Create an RSA keypair
 
@@ -75,6 +83,11 @@ int main(int argc, const char* argv[]) {
         log_info("This is the first node in the system");
     }
 
+    //Set the timer for waiting before sending request_vote. Resets everytime a heartbeat message is arriving
+    /* Intializes random number generator */
+   srand((unsigned) time(&t));
+
+    heartbeat_timer = ELECTION_TIMEOUT + rand() % 50;
     //THREADS START
     pthread_mutex_init(&our_mutex, NULL);
     if((ret = pthread_create(&inbound_network_thread, NULL, &in_server,NULL)) != 0) {
