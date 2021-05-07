@@ -87,19 +87,19 @@ int main(int argc, const char* argv[]) {
     /* Intializes random number generator */
    srand((unsigned) time(&t));
 
-    heartbeat_timer = ELECTION_TIMEOUT + rand() % 50;
+    heartbeat_timer = ELECTION_TIMEOUT + rand() % 500;
     //THREADS START
     pthread_mutex_init(&our_mutex, NULL);
     if((ret = pthread_create(&inbound_network_thread, NULL, &in_server,NULL)) != 0) {
-        printf("Error inbound_network_thread pthread_create:in");
+        log_error("Error inbound_network_thread pthread_create:in");
         return ret;
     }
     if((ret = pthread_create(&outbound_network_thread, NULL, &out_server,NULL)) != 0) {//TODO handle response 
-        printf("Error outbound_network_thread pthread_create:in");
+        log_error("Error outbound_network_thread pthread_create:in");
         return ret;
     }
     if((ret = pthread_create(&inbound_executor_thread, NULL, &inbound_executor,NULL)) != 0) {//TODO handle response 
-        printf("Error inbound_executor_thread pthread_create:in");
+        log_error("Error inbound_executor_thread pthread_create:in");
         return ret;
     }
 

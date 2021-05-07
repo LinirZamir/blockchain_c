@@ -83,7 +83,7 @@ void* out_server() {
         }
 
         //Sending Heartbeat messages as leader
-        if(self_status == 2){
+        if(self_status == 2 && heartbeat_timer == ELECTION_TIMEOUT){
              if(dict_foreach(chain_nodes,heartbeat, NULL) == 0) {
                 log_warn("There are no other nodes to accept heartbeat");
             }
